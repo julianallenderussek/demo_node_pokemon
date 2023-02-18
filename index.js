@@ -3,6 +3,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const { pokedex } = require("./data/pokedex");
 var bodyParser = require('body-parser');
+const { MongoClient } = require("mongodb");
 
 const PORT = 4000;
 const app = express();
@@ -13,6 +14,27 @@ let pokemons = pokedex;
 app.use(helmet());
 app.use(morgan("dev"));
 app.use(bodyParser.json());
+
+const options = {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+};
+
+const dbFunction = async () => {
+  // creates a new client
+  const client = new MongoClient("mongodb+srv://julianallende:Arussek1@cluster0.tkju1.mongodb.net/?retryWrites=true&w=majority", options);
+
+  // connect to the client
+  await client.connect();
+
+  try {
+    const db = await client.db("pokedex");
+    return db
+  } catch(err) {
+    client.close();
+    throw Error("Error conneting to MongoDB", err)
+  }
+};
 
 // GET all_pokemon by type DONE
 app.get("/pokemonsByType", (req, res) => {
@@ -49,52 +71,53 @@ app.get("/pokemons/:id", (req, res) => {
   return res.status(404).json({status: 404, message: "Pokemon not found"})
 });
  
+
+
+
 // GET all_pokemon DONE
-app.get("/pokemons", (req, res) => {
+app.get("/pokemons", async (req, res) => {
+  const db = await dbFunction()
+  const pokemons = await db.collection("pokemons").find().toArray()
   return res.status(200).json({status: 200, success: true, message: pokemons})
 })
 
-app.get("/", (req, res) => {
-  return res.status(200).json({message: "Server is change"})
-});
-
 // POST pokemon Creating a pokemon
-app.post("/pokemons", (req, res) => {
-  pokemons.push({id: pokemons.length + 1, ...req.body})
-  return res.status(200).json({status: 200, success: true, message: pokemons})
+app.post("/pokemons", async (req, res) => {
+  const db = await dbFunction()
+  const { name, type, region } = req.body;
+  const result = await db.collection("pokemons").insertOne({name, type, region});
+  if (result.acknowledged) {
+    return res.status(200).json({status: 200, success: true, message: "Pokemon created"})
+  }
+  return res.status(400).json({status: 400, success: true, message: "Error creating your pokemon"})
 })
 
 // DELETE Updating a pokemon
-app.delete("/pokemons/:id", (req, res) => {
-  const { id } = req.params
-  
-  console.log(pokemons.length)
-  const filterPokemons = pokemons.filter(pokemon => {
-    if (pokemon.id !== parseInt(id)) {
-      return pokemon
-    }
-  })
-  pokemons = filterPokemons
-
-  return res.status(404).json({status: 404, pokemons: filterPokemons})
+app.delete("/pokemons/:id", async (req, res) => {
+  const db = await dbFunction();
+  const result = await db.collection("pokemons").deleteOne({name: "Pikachu"});
+  return res.status(404).json({status: 404, pokemons: result})
 });
 
 // PUT Updating a pokemon
-app.put("/pokemons/:id", (req, res) => {
-  const { id } = req.params;
-  const { body } = req.body;
-
-  for (i=0; i < pokemons.length; i++) {
-    let pokemon = pokemons[i]
-    if (pokemon.id === parseInt(id)) {
-      const newPokemon = {id: i + 1, ...req.body}
-      pokemons[i] = newPokemon
-      return res.status(200).json({status: 200, pokemon: pokemons[i]})
-    }
+app.put("/pokemons/:name", async (req, res) => {
+  const { name } = req.params
+  const db = await dbFunction();
+  console.log(req.body)
+  console.log(name)
+  const result = await db.collection("pokemons").updateOne(
+    {"name": name}, 
+    {$set: req.body}
+    )
+  if (result.acknowledged) {
+    return res.status(200).json({status: 200, message: result})
   }
-  return res.status(404).json({status: 404, message: "Pokemon not found"})
+  return res.status(400).json({status: 400, message: "Error updating your document"})
 });
 
+app.get("/test", (req, res) => {
+  return res.status(200).json({message: "Server is change"})
+});
 
 app.listen(PORT, () => {
   console.log(`server running on PORT: ${PORT}`);
