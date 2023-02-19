@@ -3,11 +3,35 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const { pokedex } = require("./data/pokedex");
 var bodyParser = require('body-parser');
+const { MongoClient, ObjectId } = require("mongodb");
+require('dotenv').config()
 
-const PORT = 4000;
+const PORT = 4002;
 const app = express();
 
 let pokemons = pokedex;
+
+const options = {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+};
+
+const dbFunction = async () => {
+  // creates a new client
+  const client = new MongoClient(process.env.MONGO_URI, options);
+
+  // connect to the client
+  await client.connect();
+
+  try {
+    const db = await client.db("pokedex");
+    console.log("Client connected")
+    return db
+  } catch(err) {
+    client.close();
+    throw Error("Error conneting to MongoDB", err)
+  }
+};
 
 // Middlewares
 app.use(helmet());
@@ -38,61 +62,64 @@ app.get("/explanation/:id", (req, res) => {
 });
 
 // GET pokemon
-app.get("/pokemons/:id", (req, res) => {
-  const { id } = req.params
-  for (i=0; i < pokemons.length; i++) {
-    const pokemon = pokemons[i]
-    if (pokemon.id === parseInt(id)) {
-      return res.status(200).json({status: 200, pokemon: pokemon})
-    }
+app.get("/pokemons/:name", async (req, res) => {
+  const { name } = req.params;
+  const db = await dbFunction();
+  const result = await db.collection("pokemons").findOne({name: name});
+  if (result) {
+    return res.status(200).json({status: 200, success: true, pokemon: result})  
   }
   return res.status(404).json({status: 404, message: "Pokemon not found"})
 });
  
 // GET all_pokemon DONE
-app.get("/pokemons", (req, res) => {
-  return res.status(200).json({status: 200, success: true, message: pokemons})
+app.get("/pokemons", async (req, res) => {
+  const db = await dbFunction();
+  const result = await db.collection("pokemons").find().toArray();
+  console.log(result)
+
+  return res.status(200).json({status: 200, success: true, pokemons: result})
 })
 
 app.get("/", (req, res) => {
-  return res.status(200).json({message: "Server is change"})
+  return res.status(200).json({message: "Server is online"})
 });
 
 // POST pokemon Creating a pokemon
-app.post("/pokemons", (req, res) => {
-  pokemons.push({id: pokemons.length + 1, ...req.body})
-  return res.status(200).json({status: 200, success: true, message: pokemons})
+app.post("/pokemons", async (req, res) => {
+  const db = await dbFunction();
+  const { name, type, entry } = req.body;
+  const result = await db.collection("pokemons").insertOne({name, type, entry});
+  if (result.acknowledged) {
+    return res.status(201).json({status: 201, success: true, message: "Pokemon Created"})
+  }
+  return res.status(400).json({status: 400, success: false, message: "Error creating you pokemon"})
 })
 
 // DELETE Updating a pokemon
-app.delete("/pokemons/:id", (req, res) => {
-  const { id } = req.params
-  
-  console.log(pokemons.length)
-  const filterPokemons = pokemons.filter(pokemon => {
-    if (pokemon.id !== parseInt(id)) {
-      return pokemon
-    }
-  })
-  pokemons = filterPokemons
-
-  return res.status(404).json({status: 404, pokemons: filterPokemons})
+app.delete("/pokemons/:name", async (req, res) => {
+  const { name } = req.params
+  const db = await dbFunction();
+  const result = await db.collection("pokemons").delete({ "name" : name });
+  if (result.acknowledged) {
+    return res.status(200).json({status: 200, success: true, message: "Pokemon deleted from MongoDb"})
+  }
+  return res.status(400).json({status: 400, success: false, message: "We could not delete your pokemon"})
 });
 
 // PUT Updating a pokemon
-app.put("/pokemons/:id", (req, res) => {
+app.put("/pokemons/:id", async (req, res) => {
+  const db = await dbFunction();
   const { id } = req.params;
-  const { body } = req.body;
-
-  for (i=0; i < pokemons.length; i++) {
-    let pokemon = pokemons[i]
-    if (pokemon.id === parseInt(id)) {
-      const newPokemon = {id: i + 1, ...req.body}
-      pokemons[i] = newPokemon
-      return res.status(200).json({status: 200, pokemon: pokemons[i]})
-    }
+  const { entry, name } = req.body;
+  console.log(entry)
+  // This is how you query with _id in MongoDB :D
+  //const result = await db.collection("pokemons").findOne({"_id": new ObjectId(id) });
+  const result = await db.collection("pokemons").updateOne({"_id": new ObjectId(id)}, { $set: { entry, name } } );
+  if (result.acknowledged) {
+    return res.status(203).json({status: 404, success: true, message: "Pokemon was updated successfully"})
   }
-  return res.status(404).json({status: 404, message: "Pokemon not found"})
+  return res.status(400).json({status: 404, success: true, message: "We could not update your pokemon"})
 });
 
 
